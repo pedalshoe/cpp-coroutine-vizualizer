@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coroutine Visualizer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --panel: #0f0f1a;
+    --border: #1e1e35;
+    --c0: #00f5c4;
+    --c1: #ff6b6b;
+    --c2: #ffd93d;
+    --c3: #a78bfa;
+    --text: #e0e0f0;
+    --muted: #555577;
+    --caller: #4fc3f7;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px;
+    overflow-x: hidden;
+  }
+
+  /* Subtle grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,245,196,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,245,196,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 960px;
+    position: relative;
+    z-index: 1;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  header h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(1.8rem, 4vw, 3rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, var(--c0), var(--c3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  header p {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-top: 8px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  /* ── Main stage ── */
+  .stage {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  /* Caller column */
+  .caller-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .caller-box {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--caller);
+    border-radius: 10px;
+    padding: 14px 10px;
+    text-align: center;
+    font-size: 0.7rem;
+    color: var(--caller);
+    position: relative;
+    box-shadow: 0 0 20px rgba(79,195,247,0.1);
+  }
+
+  .caller-box .label {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 0.85rem;
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  .caller-box .caller-log {
+    font-size: 0.65rem;
+    color: var(--muted);
+    text-align: left;
+    margin-top: 8px;
+    min-height: 60px;
+    max-height: 120px;
+    overflow-y: auto;
+    line-height: 1.6;
+  }
+
+  /* Coroutines column */
+  .coroutines-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .coroutine-card {
+    background: var(--panel);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: start;
+    transition: border-color 0.3s, box-shadow 0.3s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .coroutine-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    border-radius: 3px 0 0 3px;
+    background: var(--color);
+    opacity: 0.4;
+    transition: opacity 0.3s;
+  }
+
+  .coroutine-card.active {
+    border-color: var(--color) !important;
+    box-shadow: 0 0 24px color-mix(in srgb, var(--color) 20%, transparent);
+  }
+
+  .coroutine-card.active::before { opacity: 1; }
+
+  .coroutine-card.suspended { opacity: 0.6; }
+  .coroutine-card.done { opacity: 0.35; }
+
+  .card-left {}
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .co-name {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--color);
+  }
+
+  .co-status {
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 20px;
+    border: 1px solid var(--color);
+    color: var(--color);
+    opacity: 0.7;
+  }
+
+  .co-code {
+    font-size: 0.7rem;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+
+  .co-code .highlight {
+    color: var(--color);
+    font-weight: 600;
+  }
+
+  .co-code .line {
+    display: block;
+    padding: 1px 0;
+    transition: background 0.2s;
+  }
+
+  .co-code .line.current {
+    background: color-mix(in srgb, var(--color) 10%, transparent);
+    border-radius: 3px;
+    padding: 1px 4px;
+  }
+
+  /* Values produced */
+  .values-box {
+    min-width: 100px;
+    text-align: right;
+  }
+
+  .values-label {
+    font-size: 0.6rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 6px;
+  }
+
+  .value-chip {
+    display: inline-block;
+    background: color-mix(in srgb, var(--color) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color) 40%, transparent);
+    color: var(--color);
+    font-size: 0.7rem;
+    padding: 2px 7px;
+    border-radius: 4px;
+    margin: 2px;
+    animation: popIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes popIn {
+    from { transform: scale(0); opacity: 0; }
+    to   { transform: scale(1); opacity: 1; }
+  }
+
+  /* Arrow / signal animation */
+  .signal-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .signal-dot {
+    position: absolute;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--caller);
+    top: 50%;
+    transform: translateY(-50%);
+    animation: travelRight 0.5s ease-in-out forwards;
+  }
+
+  .signal-dot.returning {
+    background: var(--c0);
+    animation: travelLeft 0.5s ease-in-out forwards;
+  }
+
+  @keyframes travelRight {
+    from { left: 0; opacity: 1; }
+    to   { left: 100%; opacity: 0; }
+  }
+
+  @keyframes travelLeft {
+    from { left: 100%; opacity: 1; }
+    to   { left: 0; opacity: 0; }
+  }
+
+  /* ── Log panel ── */
+  .log-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 24px;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  .log-panel h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 10px;
+  }
+
+  .log-entry {
+    font-size: 0.72rem;
+    line-height: 1.8;
+    display: flex;
+    gap: 10px;
+    animation: fadeSlideIn 0.3s ease;
+  }
+
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .log-time { color: var(--muted); min-width: 42px; }
+  .log-msg  { color: var(--text); }
+  .log-msg .kw { font-weight: 600; }
+
+  /* ── Controls ── */
+  .controls {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  button {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 10px 22px;
+    border-radius: 7px;
+    border: 1px solid;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  #btn-step {
+    background: transparent;
+    border-color: var(--c0);
+    color: var(--c0);
+  }
+  #btn-step:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--c0) 15%, transparent);
+    box-shadow: 0 0 16px color-mix(in srgb, var(--c0) 30%, transparent);
+  }
+
+  #btn-auto {
+    background: transparent;
+    border-color: var(--c3);
+    color: var(--c3);
+  }
+  #btn-auto:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--c3) 15%, transparent);
+    box-shadow: 0 0 16px color-mix(in srgb, var(--c3) 30%, transparent);
+  }
+
+  #btn-reset {
+    background: transparent;
+    border-color: var(--muted);
+    color: var(--muted);
+  }
+  #btn-reset:hover {
+    border-color: var(--text);
+    color: var(--text);
+  }
+
+  button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .speed-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 0.7rem;
+  }
+
+  input[type=range] {
+    accent-color: var(--c3);
+    width: 80px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>Coroutine Visualizer</h1>
+    <p>Watch coroutines suspend · yield · resume in real time</p>
+  </header>
+
+  <div class="stage">
+    <!-- Caller -->
+    <div class="caller-col">
+      <div class="caller-box" id="caller-box">
+        <span class="label">main()</span>
+        <span style="font-size:0.65rem; color:var(--muted)">The Caller</span>
+        <div class="caller-log" id="caller-log"></div>
+      </div>
+    </div>
+
+    <!-- Coroutines -->
+    <div class="coroutines-col" id="coroutines-col">
+      <!-- injected by JS -->
+    </div>
+  </div>
+
+  <!-- Event log -->
+  <div class="log-panel">
+    <h3>Event Log</h3>
+    <div id="log"></div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button id="btn-step">⏭ Step</button>
+    <button id="btn-auto">▶ Auto</button>
+    <button id="btn-reset">↺ Reset</button>
+    <div class="speed-control">
+      <span>Speed</span>
+      <input type="range" id="speed" min="300" max="2000" value="900" step="100">
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// Coroutine definitions
+// Each has: name, color, a sequence of "steps"
+// step types: run, yield, resume, done
+// ─────────────────────────────────────────────
+const COROUTINE_DEFS = [
+  {
+    id: 'co0',
+    name: 'fibonacci()',
+    color: '#00f5c4',
+    description: 'Yields Fibonacci numbers',
+    codeLines: [
+      'long long a=0, b=1;',
+      'while(true) {',
+      '  co_yield a;       ← here',
+      '  auto next = a+b;',
+      '  a = b; b = next;',
+      '}',
+    ],
+    yieldLine: 2,
+    values: [0, 1, 1, 2, 3, 5, 8, 13, 21, 34],
+  },
+  {
+    id: 'co1',
+    name: 'range(0,20,3)',
+    color: '#ff6b6b',
+    description: 'Yields 0,3,6,9,12,15,18',
+    codeLines: [
+      'for(int i=start;',
+      '    i<end; i+=step) {',
+      '  co_yield i;       ← here',
+      '}',
+    ],
+    yieldLine: 2,
+    values: [0, 3, 6, 9, 12, 15, 18],
+  },
+  {
+    id: 'co2',
+    name: 'squares()',
+    color: '#ffd93d',
+    description: 'Yields 1², 2², 3²…',
+    codeLines: [
+      'int n = 1;',
+      'while(true) {',
+      '  co_yield n*n;     ← here',
+      '  n++;',
+      '}',
+    ],
+    yieldLine: 2,
+    values: [1, 4, 9, 16, 25, 36, 49, 64],
+  },
+  {
+    id: 'co3',
+    name: 'evens()',
+    color: '#a78bfa',
+    description: 'Yields even numbers',
+    codeLines: [
+      'int n = 0;',
+      'while(true) {',
+      '  co_yield n;       ← here',
+      '  n += 2;',
+      '}',
+    ],
+    yieldLine: 2,
+    values: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18],
+  },
+];
+
+// ─────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────
+let coStates = [];   // { def, valueIndex, status: 'waiting'|'running'|'suspended'|'done' }
+let stepIndex = 0;
+let totalSteps = 0;
+let autoTimer = null;
+let logTime = 0;
+
+// Build a flat sequence of events across coroutines (round-robin)
+let events = [];
+
+function buildEvents() {
+  events = [];
+  // Interleave: caller resumes co0, co0 yields, caller resumes co1, co1 yields, ...
+  // We'll do 3 full rounds per coroutine then move to next round
+  const maxYields = 6; // per coroutine
+  for (let round = 0; round < maxYields; round++) {
+    for (let ci = 0; ci < COROUTINE_DEFS.length; ci++) {
+      const def = COROUTINE_DEFS[ci];
+      const isLast = round === maxYields - 1 && ci === COROUTINE_DEFS.length - 1;
+      events.push({ type: 'resume', ci, round });
+      events.push({ type: 'yield',  ci, round });
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
+// DOM helpers
+// ─────────────────────────────────────────────
+function renderCards() {
+  const col = document.getElementById('coroutines-col');
+  col.innerHTML = '';
+  COROUTINE_DEFS.forEach((def, ci) => {
+    const s = coStates[ci];
+    const card = document.createElement('div');
+    card.className = `coroutine-card ${s.status}`;
+    card.id = `card-${ci}`;
+    card.style.setProperty('--color', def.color);
+
+    const statusLabels = {
+      waiting: 'waiting',
+      running: '▶ running',
+      suspended: '⏸ suspended',
+      done: '✓ done',
+    };
+
+    const codeHtml = def.codeLines.map((line, li) => {
+      const isCurrent = s.status === 'running' && li === def.yieldLine;
+      const cls = isCurrent ? 'line current' : 'line';
+      return `<span class="${cls}">${escHtml(line)}</span>`;
+    }).join('');
+
+    const valuesHtml = s.produced.map(v =>
+      `<span class="value-chip">${v}</span>`
+    ).join('');
+
+    card.innerHTML = `
+      <div class="card-left">
+        <div class="card-header">
+          <span class="co-name">${def.name}</span>
+          <span class="co-status">${statusLabels[s.status]}</span>
+        </div>
+        <div class="co-code">${codeHtml}</div>
+      </div>
+      <div class="values-box">
+        <div class="values-label">yielded</div>
+        <div id="chips-${ci}">${valuesHtml}</div>
+      </div>
+    `;
+    col.appendChild(card);
+  });
+}
+
+function updateCard(ci) {
+  // Re-render just one card
+  const def = COROUTINE_DEFS[ci];
+  const s = coStates[ci];
+  const card = document.getElementById(`card-${ci}`);
+  if (!card) return;
+
+  const statusLabels = {
+    waiting: 'waiting',
+    running: '▶ running',
+    suspended: '⏸ suspended',
+    done: '✓ done',
+  };
+
+  card.className = `coroutine-card ${s.status}`;
+
+  const codeHtml = def.codeLines.map((line, li) => {
+    const isCurrent = s.status === 'running' && li === def.yieldLine;
+    const cls = isCurrent ? 'line current' : 'line';
+    return `<span class="${cls}">${escHtml(line)}</span>`;
+  }).join('');
+
+  card.querySelector('.co-code').innerHTML = codeHtml;
+  card.querySelector('.co-status').textContent = statusLabels[s.status];
+
+  // Chips
+  const chips = card.querySelector(`#chips-${ci}`);
+  // Add only the latest chip with animation
+  if (s.produced.length > 0) {
+    const last = s.produced[s.produced.length - 1];
+    const chip = document.createElement('span');
+    chip.className = 'value-chip';
+    chip.textContent = last;
+    chip.style.setProperty('--color', def.color);
+    chips.appendChild(chip);
+  }
+}
+
+function addLog(msg, color) {
+  const log = document.getElementById('log');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  const t = (logTime / 1000).toFixed(1);
+  entry.innerHTML = `
+    <span class="log-time">${t}s</span>
+    <span class="log-msg" style="color:${color||'var(--text)'}">${msg}</span>
+  `;
+  log.appendChild(entry);
+  log.scrollTop = log.scrollHeight;
+}
+
+function addCallerLog(msg) {
+  const cl = document.getElementById('caller-log');
+  cl.innerHTML += `<div style="color:var(--caller)">${msg}</div>`;
+  cl.scrollTop = cl.scrollHeight;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─────────────────────────────────────────────
+// Step execution
+// ─────────────────────────────────────────────
+function executeStep() {
+  if (stepIndex >= events.length) {
+    addLog('All coroutines exhausted. Simulation complete.', 'var(--muted)');
+    stopAuto();
+    document.getElementById('btn-step').disabled = true;
+    document.getElementById('btn-auto').disabled = true;
+    return;
+  }
+
+  const ev = events[stepIndex++];
+  const def = COROUTINE_DEFS[ev.ci];
+  const s = coStates[ev.ci];
+  logTime += parseInt(document.getElementById('speed').value) * 0.6;
+
+  if (ev.type === 'resume') {
+    // Caller resumes the coroutine
+    s.status = 'running';
+    updateCard(ev.ci);
+    addCallerLog(`resume(${def.name})`);
+    addLog(
+      `<span class="kw" style="color:var(--caller)">main()</span> → resumes <span style="color:${def.color}">${def.name}</span>`,
+      'var(--text)'
+    );
+    // Highlight caller box
+    const cb = document.getElementById('caller-box');
+    cb.style.boxShadow = `0 0 30px color-mix(in srgb, ${def.color} 40%, transparent)`;
+    setTimeout(() => { cb.style.boxShadow = ''; }, 400);
+  }
+
+  if (ev.type === 'yield') {
+    const val = def.values[s.valueIndex % def.values.length];
+    s.valueIndex++;
+    s.produced.push(val);
+    s.status = 'suspended';
+    updateCard(ev.ci);
+    addLog(
+      `<span style="color:${def.color}">${def.name}</span> <span class="kw" style="color:var(--c0)">co_yield</span> <span style="color:${def.color};font-weight:700">${val}</span> → suspends`,
+      'var(--text)'
+    );
+    addCallerLog(`← got ${val}`);
+  }
+}
+
+// ─────────────────────────────────────────────
+// Auto play
+// ─────────────────────────────────────────────
+function startAuto() {
+  const btn = document.getElementById('btn-auto');
+  btn.textContent = '⏸ Pause';
+  const speed = () => parseInt(document.getElementById('speed').value);
+  autoTimer = setInterval(() => {
+    executeStep();
+    if (stepIndex >= events.length) stopAuto();
+  }, speed());
+  // Make interval respect speed changes
+  document.getElementById('speed').addEventListener('input', () => {
+    if (autoTimer) { stopAuto(); startAuto(); }
+  }, { once: true });
+}
+
+function stopAuto() {
+  clearInterval(autoTimer);
+  autoTimer = null;
+  document.getElementById('btn-auto').textContent = '▶ Auto';
+}
+
+// ─────────────────────────────────────────────
+// Init / Reset
+// ─────────────────────────────────────────────
+function init() {
+  stopAuto();
+  logTime = 0;
+  stepIndex = 0;
+  coStates = COROUTINE_DEFS.map(def => ({
+    def,
+    valueIndex: 0,
+    status: 'waiting',
+    produced: [],
+  }));
+  buildEvents();
+  renderCards();
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('caller-log').innerHTML = '';
+  document.getElementById('btn-step').disabled = false;
+  document.getElementById('btn-auto').disabled = false;
+  addLog('Simulation ready. Press <strong>Step</strong> or <strong>Auto</strong> to begin.', 'var(--muted)');
+}
+
+// ─────────────────────────────────────────────
+// Event listeners
+// ─────────────────────────────────────────────
+document.getElementById('btn-step').addEventListener('click', executeStep);
+
+document.getElementById('btn-auto').addEventListener('click', () => {
+  if (autoTimer) stopAuto();
+  else startAuto();
+});
+
+document.getElementById('btn-reset').addEventListener('click', init);
+
+// Boot
+init();
+</script>
+</body>
+</html>
